@@ -22,6 +22,7 @@ https://260926-png-recolor.vercel.app （mainへのpushでVercelに自動デプ�
 
 選んだ場所に`<元フォルダ名>-<HEX>`（例: `icons-E53935`）という新しいフォルダを作り、元のフォルダ構成のまま保存する。
 読み込み元と同じフォルダを選んでも、元の画像は上書きされない。
+同じ名前のフォルダがすでにあるときは`icons-E53935-2`のように番号を付けた新しいフォルダに保存する（前回の保存から外した画像が混ざらないように）。
 ばらばらのファイルを読み込んだ場合、フォルダ名は`recolor-<HEX>`になる。
 
 ## 開発
@@ -30,9 +31,10 @@ https://260926-png-recolor.vercel.app （mainへのpushでVercelに自動デプ�
 pnpm install
 pnpm dev        # http://localhost:3200
 pnpm test       # Vitest
+pnpm test:e2e   # Playwright（本番ビルドを起動して実行。初回のみ pnpm exec playwright install chromium）
 pnpm lint       # Biome
 pnpm typecheck
 pnpm build
 ```
 
-Next.js 16（App Router）/ Tailwind CSS v4 / Biome / Vitest。PNGの書き出しはfast-png、ZIPはfflate。
+Next.js 16（App Router）/ Tailwind CSS v4 / Biome / Vitest / Playwright。PNGの書き出しはfast-png、ZIPはfflate。

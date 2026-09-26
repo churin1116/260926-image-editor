@@ -35,3 +35,20 @@
 
 `outputLayout`（`paths.ts`）は常に`<元フォルダ名>-<HEX>`を新しく作ってその中に書く。
 読み込み元のフォルダを保存先に選んでも、元画像を上書きしないため。
+同名のフォルダがあれば`writeToFolder`が`-2`、`-3`…を付ける（`freeName`）。既存フォルダに
+上書き保存すると、前回から外した画像が残って今の画像一覧とずれるため。既存ファイルの削除はしない。
+
+## フォルダを開く方法がブラウザで違う理由
+
+Chrome / Edgeでは「フォルダを選ぶ」に`<input webkitdirectory>`ではなく`showDirectoryPicker`を使う
+（`collect.ts`の`pickSourceFolder`）。前者だとChromeが「このサイトにN個のファイルをアップロードしますか？」
+と確認を出し、画像がサーバーに送られるように読めてしまうため。他のブラウザは`webkitdirectory`のまま。
+
+## テスト
+
+- `pnpm test`: 純粋関数のVitest（`src/**/*.test.ts`だけが対象。`vitest.config.ts`）
+- `pnpm test:e2e`: Playwrightで本番ビルドを操作する。フォルダピッカーは操作できないので、
+  `addInitScript`で`showDirectoryPicker`をOPFS（ブラウザ内の非公開ファイル領域）を返す関数に
+  差し替えている。差し替えはページ読み込み前に必要（フォルダ保存かZIPかはマウント時に決まるため）
+- 「正確さ」のテストは、アルファ3の薄いピクセルの色が指定色ちょうどかで見ている。
+  書き出しをcanvas経由に変えるとこのテストが落ちることを確認済み
