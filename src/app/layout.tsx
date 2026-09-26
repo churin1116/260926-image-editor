@@ -10,8 +10,8 @@ const plex = IBM_Plex_Sans_JP({
 });
 
 export const metadata: Metadata = {
-  title: "いろがえ",
-  description: "黒一色のPNGを、選んだ色に塗り替えます。",
+  title: "Image Editor",
+  description: "シンプルな画像編集ツール。黒一色のPNGを、選んだ色に塗り替えます。",
   // An internal tool: keep it out of search results.
   robots: { index: false, follow: false },
 };

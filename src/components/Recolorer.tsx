@@ -267,7 +267,7 @@ export default function Recolorer() {
   return (
     <div className="app" style={vars} {...dropHandlers}>
       <aside className="panel">
-        <h1 className="brand">いろがえ</h1>
+        <h1 className="brand">Image Editor</h1>
         <ColorPanel
           hsv={hsv}
           onChange={setHsv}
