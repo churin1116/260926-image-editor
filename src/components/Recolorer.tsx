@@ -8,11 +8,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { type Collected, fromDataTransfer, fromFileList } from "@/lib/collect";
+import {
+  type Collected,
+  fromDataTransfer,
+  fromDirectoryHandle,
+  fromFileList,
+  pickSourceFolder,
+} from "@/lib/collect";
 import { type Hsv, hexCode, hsvToRgb, rgbToHex, textOn } from "@/lib/color";
 import { makeMask, renderPng } from "@/lib/image";
 import { comparePaths, fileName, outputLayout } from "@/lib/paths";
-import { canSaveToFolder, downloadZip, pickFolder, writeToFolder } from "@/lib/save";
+import { downloadZip, hasFolderAccess, pickSaveFolder, writeToFolder } from "@/lib/save";
 import { load, store } from "@/lib/storage";
 import { ColorPanel } from "./ColorPanel";
 import { type Item, PreviewGrid } from "./PreviewGrid";
@@ -63,7 +69,7 @@ export default function Recolorer() {
   const [status, setStatus] = useState<Status | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const [folderMode] = useState(canSaveToFolder);
+  const [folderMode] = useState(hasFolderAccess);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
@@ -134,6 +140,21 @@ export default function Recolorer() {
     setNotice(notes.length > 0 ? notes.join("。") : null);
   };
 
+  const openFolder = async () => {
+    if (!folderMode) {
+      folderInput.current?.click();
+      return;
+    }
+    try {
+      const dir = await pickSourceFolder();
+      if (dir) await addFiles(await fromDirectoryHandle(dir));
+    } catch (err) {
+      setNotice(
+        `フォルダを開けませんでした（${err instanceof Error ? err.message : String(err)}）`,
+      );
+    }
+  };
+
   const removeItem = useCallback((path: string) => {
     setItems((prev) => {
       const gone = prev.find((i) => i.path === path);
@@ -163,11 +184,13 @@ export default function Recolorer() {
     setStatus(null);
     try {
       if (folderMode) {
-        const parent = await pickFolder();
+        const parent = await pickSaveFolder();
         if (!parent) return;
         setSaving({ done: 0, total });
-        await writeToFolder(parent, folder, jobs, (done) => setSaving({ done, total }));
-        const where = parent.name ? `${parent.name}/${folder}` : folder;
+        const saved = await writeToFolder(parent, folder, jobs, (done) =>
+          setSaving({ done, total }),
+        );
+        const where = parent.name ? `${parent.name}/${saved}` : saved;
         setStatus({ kind: "ok", text: `${where} に${total}枚保存しました` });
       } else {
         setSaving({ done: 0, total });
@@ -235,7 +258,7 @@ export default function Recolorer() {
       <button type="button" className="btn" onClick={() => fileInput.current?.click()}>
         ファイルを{verb}
       </button>
-      <button type="button" className="btn" onClick={() => folderInput.current?.click()}>
+      <button type="button" className="btn" onClick={openFolder}>
         フォルダを{verb}
       </button>
     </>

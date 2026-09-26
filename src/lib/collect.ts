@@ -7,26 +7,69 @@ export type Collected = { picked: Picked[]; skipped: number };
 // macOS "._icon.png" AppleDouble files, which end in .png but are not images
 // and appear whenever a folder has lived on a USB or SMB drive.
 const isHidden = (path: string) => path.split("/").some((part) => part.startsWith("."));
-const isPng = (name: string) => /\.png$/i.test(name);
+const isPng = (path: string) => /\.png$/i.test(path);
 
-function sorted(picked: Picked[], skipped: number): Collected {
-  return { picked: picked.sort((a, b) => comparePaths(a.path, b.path)), skipped };
+/** Shared filtering for every way files come in, so they all count alike. */
+function collector() {
+  const picked: Picked[] = [];
+  let skipped = 0;
+  return {
+    /** Checked before reading a file, so hidden and non-PNG files are never opened. */
+    wants(path: string): boolean {
+      if (isHidden(path)) return false;
+      if (isPng(path)) return true;
+      skipped++;
+      return false;
+    },
+    add(file: File, path: string) {
+      picked.push({ file, path });
+    },
+    result(): Collected {
+      return { picked: picked.sort((a, b) => comparePaths(a.path, b.path)), skipped };
+    },
+  };
 }
 
 /** From <input type="file">, with or without webkitdirectory. */
-export function fromFileList(list: FileList): Collected {
-  const picked: Picked[] = [];
-  let skipped = 0;
+export function fromFileList(list: Iterable<File>): Collected {
+  const c = collector();
   for (const file of list) {
     const path = file.webkitRelativePath || file.name;
-    if (isHidden(path)) continue;
-    if (!isPng(file.name)) {
-      skipped++;
-      continue;
-    }
-    picked.push({ file, path });
+    if (c.wants(path)) c.add(file, path);
   }
-  return sorted(picked, skipped);
+  return c.result();
+}
+
+/**
+ * Where the File System Access API exists (Chrome, Edge), folders are opened
+ * with it instead of <input webkitdirectory>: for that input Chrome asks
+ * "Upload N files to this site?", which reads as if the images leave the
+ * machine. Resolves null on cancel.
+ */
+export async function pickSourceFolder(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    return (await window.showDirectoryPicker?.({ id: "recolor-open", mode: "read" })) ?? null;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return null;
+    throw err;
+  }
+}
+
+/** Paths start with the folder's own name, matching what webkitdirectory gives. */
+export async function fromDirectoryHandle(dir: FileSystemDirectoryHandle): Promise<Collected> {
+  const c = collector();
+  const walk = async (handle: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+    for await (const child of handle.values()) {
+      const path = `${prefix}/${child.name}`;
+      if (child.kind === "directory") {
+        if (!isHidden(child.name)) await walk(child as FileSystemDirectoryHandle, path);
+      } else if (c.wants(path)) {
+        c.add(await (child as FileSystemFileHandle).getFile(), path);
+      }
+    }
+  };
+  await walk(dir, dir.name);
+  return c.result();
 }
 
 function readAll(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
@@ -64,29 +107,19 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<Collected> {
     else if (file) loose.push(file);
   }
 
-  const picked: Picked[] = [];
-  let skipped = 0;
-  for (const file of loose) {
-    if (isHidden(file.name)) continue;
-    if (isPng(file.name)) picked.push({ file, path: file.name });
-    else skipped++;
-  }
+  const c = collector();
+  for (const file of loose) if (c.wants(file.name)) c.add(file, file.name);
 
   const walk = async (entry: FileSystemEntry): Promise<void> => {
-    if (isHidden(entry.name)) return;
+    const path = entry.fullPath.replace(/^\//, "");
     if (entry.isDirectory) {
+      if (isHidden(entry.name)) return;
       const children = await readAll((entry as FileSystemDirectoryEntry).createReader());
       for (const child of children) await walk(child);
-      return;
+    } else if (c.wants(path)) {
+      c.add(await toFile(entry as FileSystemFileEntry), path);
     }
-    if (!isPng(entry.name)) {
-      skipped++;
-      return;
-    }
-    const file = await toFile(entry as FileSystemFileEntry);
-    picked.push({ file, path: entry.fullPath.replace(/^\//, "") });
   };
-
   for (const root of roots) await walk(root);
-  return sorted(picked, skipped);
+  return c.result();
 }

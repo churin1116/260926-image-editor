@@ -3,8 +3,12 @@ import { zipSync } from "fflate";
 export type Job = { path: string; render: () => Promise<Uint8Array<ArrayBuffer>> };
 type Progress = (done: number) => void;
 
-/** Chrome and Edge on desktop; everywhere else saves a ZIP instead. */
-export function canSaveToFolder(): boolean {
+/**
+ * Chrome and Edge on desktop, where folders open and save through the File
+ * System Access API. Elsewhere folders open through <input webkitdirectory>
+ * and saving falls back to a ZIP download.
+ */
+export function hasFolderAccess(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
 }
 
@@ -12,7 +16,7 @@ export function canSaveToFolder(): boolean {
  * Must run first in a click or key handler: the picker needs the user gesture,
  * which expires if anything is awaited before it. Resolves null on cancel.
  */
-export async function pickFolder(): Promise<FileSystemDirectoryHandle | null> {
+export async function pickSaveFolder(): Promise<FileSystemDirectoryHandle | null> {
   try {
     // The id makes the browser reopen wherever the user saved last time.
     return (await window.showDirectoryPicker?.({ id: "recolor-save", mode: "readwrite" })) ?? null;
@@ -22,23 +26,50 @@ export async function pickFolder(): Promise<FileSystemDirectoryHandle | null> {
   }
 }
 
+/**
+ * The base name, or "-2", "-3"… appended while that name is taken. Saving into
+ * an existing folder would leave behind images removed since the last save.
+ */
+export async function freeName(base: string, taken: (name: string) => Promise<boolean>) {
+  if (!(await taken(base))) return base;
+  for (let n = 2; ; n++) {
+    if (!(await taken(`${base}-${n}`))) return `${base}-${n}`;
+  }
+}
+
+async function exists(parent: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+  try {
+    await parent.getDirectoryHandle(name);
+    return true;
+  } catch (err) {
+    if (!(err instanceof DOMException)) throw err;
+    if (err.name === "NotFoundError") return false;
+    // A file already has the name, which rules it out just the same.
+    if (err.name === "TypeMismatchError") return true;
+    throw err;
+  }
+}
+
+/** Resolves to the name of the folder actually created. */
 export async function writeToFolder(
   parent: FileSystemDirectoryHandle,
   folder: string,
   jobs: Job[],
   onProgress: Progress,
-): Promise<void> {
-  const root = await parent.getDirectoryHandle(folder, { create: true });
+): Promise<string> {
+  const name = await freeName(folder, (n) => exists(parent, n));
+  const root = await parent.getDirectoryHandle(name, { create: true });
   for (const [i, job] of jobs.entries()) {
     const parts = job.path.split("/");
-    const name = parts.pop() as string;
+    const file = parts.pop() as string;
     let dir = root;
     for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
-    const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    const writable = await (await dir.getFileHandle(file, { create: true })).createWritable();
     await writable.write(await job.render());
     await writable.close();
     onProgress(i + 1);
   }
+  return name;
 }
 
 /**
