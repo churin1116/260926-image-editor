@@ -8,6 +8,13 @@ export type Item = { path: string; name: string; file: File; mask: Mask };
 
 type Props = { items: Item[]; onRemove: (path: string) => void };
 
+// Set as the longhand, not through a var() in the mask shorthand: a var() there
+// is re-parsed on every recolor, for every tile.
+const maskStyle = (url: string) => ({
+  maskImage: `url("${url}")`,
+  WebkitMaskImage: `url("${url}")`,
+});
+
 // Memoized and color-agnostic: the tiles paint with var(--ink) from an ancestor,
 // so dragging the wheel never re-renders this list.
 export const PreviewGrid = memo(function PreviewGrid({ items, onRemove }: Props) {
@@ -16,16 +23,12 @@ export const PreviewGrid = memo(function PreviewGrid({ items, onRemove }: Props)
       {items.map((item) => (
         <li key={item.path} className="tile">
           <div className="tile-canvas">
+            {item.mask.paper && <div className="tile-paper" style={maskStyle(item.mask.paper)} />}
             <div
               className="tile-ink"
               role="img"
               aria-label={item.name}
-              // Set as the longhand, not through a var() in the mask shorthand:
-              // a var() there is re-parsed on every recolor, for every tile.
-              style={{
-                maskImage: `url("${item.mask.url}")`,
-                WebkitMaskImage: `url("${item.mask.url}")`,
-              }}
+              style={maskStyle(item.mask.ink)}
             />
           </div>
           <p className="tile-name" title={`${item.path}\n${item.mask.width} × ${item.mask.height}`}>

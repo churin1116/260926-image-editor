@@ -19,7 +19,8 @@ const inSquare = (x: number, y: number) => x >= 4 && x < 12 && y >= 4 && y < 12;
 const TRANSPARENT = png(16, (x, y) =>
   x === 2 && y === 2 ? [0, 0, 0, 3] : inSquare(x, y) ? [0, 0, 0, 255] : [0, 0, 0, 0],
 );
-// White background with a mid-gray pixel, which should become half ink.
+// White background with a mid-gray pixel, which should become half ink: half
+// way to white while white is kept, half transparent once it is cleared.
 const WHITE_BG = png(16, (x, y) =>
   x === 2 && y === 2
     ? [128, 128, 128, 255]
@@ -123,8 +124,37 @@ test("opens a folder, recolors every preview, and saves exact pixels", async ({ 
   expect(pixel(a, 2, 2)).toEqual([30, 136, 229, 3]);
   expect(pixel(a, 0, 0)[3]).toBe(0);
   expect(pixel(b, 8, 8)).toEqual([30, 136, 229, 255]);
+  expect(pixel(b, 2, 2)).toEqual([143, 196, 242, 255]);
+  expect(pixel(b, 0, 0)).toEqual([255, 255, 255, 255]);
+});
+
+test("clearing white makes the white background transparent", async ({ page }) => {
+  await useOpfsPickers(page);
+  await page.getByRole("button", { name: "フォルダを選ぶ" }).click();
+  await expect(page.locator(".tile")).toHaveCount(2);
+  await setHex(page, "1e88e5");
+
+  // Only b.png has white to keep, and the preview shows it until it is cleared.
+  const paper = page.locator(".tile-paper");
+  await expect(paper).toHaveCount(1);
+  await expect(paper).toBeVisible();
+  await page.getByLabel("白い部分を透明にする").check();
+  await expect(paper).toBeHidden();
+
+  await page.getByRole("button", { name: "フォルダに保存" }).click();
+  await expect(page.getByText("out/icons-1E88E5 に2枚保存しました")).toBeVisible();
+  const files = await savedFiles(page);
+  const a = files["icons-1E88E5/a.png"];
+  const b = files["icons-1E88E5/sub/b.png"];
+  expect(pixel(a, 8, 8)).toEqual([30, 136, 229, 255]);
+  expect(pixel(a, 2, 2)).toEqual([30, 136, 229, 3]);
+  expect(pixel(b, 8, 8)).toEqual([30, 136, 229, 255]);
   expect(pixel(b, 2, 2)).toEqual([30, 136, 229, 127]);
   expect(pixel(b, 0, 0)[3]).toBe(0);
+
+  // The choice is remembered for the next visit.
+  await page.reload();
+  await expect(page.getByLabel("白い部分を透明にする")).toBeChecked();
 });
 
 test("saving the same color again goes into a new folder", async ({ page }) => {

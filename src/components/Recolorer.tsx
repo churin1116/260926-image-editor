@@ -16,7 +16,7 @@ import {
   pickSourceFolder,
 } from "@/lib/collect";
 import { type Hsv, hexCode, hsvToRgb, rgbToHex, textOn } from "@/lib/color";
-import { makeMask, renderPng } from "@/lib/image";
+import { makeMask, renderPng, revokeMask } from "@/lib/image";
 import { comparePaths, fileName, outputLayout } from "@/lib/paths";
 import { downloadZip, hasFolderAccess, pickSaveFolder, writeToFolder } from "@/lib/save";
 import { load, store } from "@/lib/storage";
@@ -41,6 +41,7 @@ const isHexList = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((s) => typeof s === "string" && /^#[0-9A-F]{6}$/.test(s));
 const isBackground = (v: unknown): v is Background => BACKGROUNDS.some((b) => b.value === v);
 const isTileSize = (v: unknown): v is number => typeof v === "number" && v >= 64 && v <= 256;
+const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
 
 const byPath = (a: Item, b: Item) => comparePaths(a.path, b.path);
 
@@ -61,6 +62,7 @@ export default function Recolorer() {
     load("background", "white", isBackground),
   );
   const [tileSize, setTileSize] = useState(() => load("tileSize", 128, isTileSize));
+  const [clearWhite, setClearWhite] = useState(() => load("clearWhite", false, isBoolean));
 
   const [items, setItems] = useState<Item[]>([]);
   const [importing, setImporting] = useState<Progress | null>(null);
@@ -89,6 +91,7 @@ export default function Recolorer() {
   useEffect(() => store("swatches", swatches), [swatches]);
   useEffect(() => store("background", background), [background]);
   useEffect(() => store("tileSize", tileSize), [tileSize]);
+  useEffect(() => store("clearWhite", clearWhite), [clearWhite]);
 
   useEffect(() => {
     // Not in React's attribute types, and React drops unknown boolean props.
@@ -114,7 +117,7 @@ export default function Recolorer() {
       buffer = [];
       setItems((prev) => {
         const replaced = new Set(incoming.map((i) => i.path));
-        for (const old of prev) if (replaced.has(old.path)) URL.revokeObjectURL(old.mask.url);
+        for (const old of prev) if (replaced.has(old.path)) revokeMask(old.mask);
         return [...prev.filter((i) => !replaced.has(i.path)), ...incoming].sort(byPath);
       });
     };
@@ -158,14 +161,14 @@ export default function Recolorer() {
   const removeItem = useCallback((path: string) => {
     setItems((prev) => {
       const gone = prev.find((i) => i.path === path);
-      if (gone) URL.revokeObjectURL(gone.mask.url);
+      if (gone) revokeMask(gone.mask);
       return prev.filter((i) => i.path !== path);
     });
     setStatus(null);
   }, []);
 
   const clearAll = () => {
-    for (const item of items) URL.revokeObjectURL(item.mask.url);
+    for (const item of items) revokeMask(item.mask);
     setItems([]);
     setNotice(null);
     setStatus(null);
@@ -178,7 +181,7 @@ export default function Recolorer() {
     const { folder, files } = layout;
     const jobs = items.map((item, i) => ({
       path: files[i],
-      render: () => renderPng(item.file, color),
+      render: () => renderPng(item.file, color, clearWhite),
     }));
     const total = jobs.length;
     setStatus(null);
@@ -276,6 +279,14 @@ export default function Recolorer() {
         />
 
         <div className="save">
+          <label className="toggle">
+            白い部分を透明にする
+            <input
+              type="checkbox"
+              checked={clearWhite}
+              onChange={(e) => setClearWhite(e.target.checked)}
+            />
+          </label>
           <button
             type="button"
             className="save-btn"
@@ -298,7 +309,7 @@ export default function Recolorer() {
         </div>
       </aside>
 
-      <main className="stage" data-bg={background}>
+      <main className="stage" data-bg={background} data-white={clearWhite ? "clear" : "keep"}>
         {items.length > 0 || importing ? (
           <>
             <div className="toolbar">
