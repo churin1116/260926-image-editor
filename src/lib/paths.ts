@@ -7,10 +7,9 @@ export function commonRoot(paths: string[]): string | null {
 }
 
 /**
- * Output goes into a new folder named after the source folder and the color
- * ("icons-E53935"), so saving never overwrites the originals even when the user
- * picks the folder they loaded from. The source folder's own name is dropped
- * from each path since the new folder replaces it.
+ * Each file keeps its place inside the source folder, minus the source folder's
+ * own name: saving to a folder puts them straight into the chosen one, and the
+ * ZIP wraps them in a folder named after the source and the color ("icons-E53935").
  */
 export function outputLayout(paths: string[], code: string): { folder: string; files: string[] } {
   const root = commonRoot(paths);

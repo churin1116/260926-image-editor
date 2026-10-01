@@ -25,10 +25,10 @@ https://260926-image-editor.vercel.app （mainへのpushでVercelに自動デプ
 
 ## 保存先
 
-選んだ場所に`<元フォルダ名>-<HEX>`（例: `icons-E53935`）という新しいフォルダを作り、元のフォルダ構成のまま保存する。
-読み込み元と同じフォルダを選んでも、元の画像は上書きされない。
-同じ名前のフォルダがすでにあるときは`icons-E53935-2`のように番号を付けた新しいフォルダに保存する（前回の保存から外した画像が混ざらないように）。
-ばらばらのファイルを読み込んだ場合、フォルダ名は`recolor-<HEX>`になる。
+- 「フォルダに保存」は、選んだフォルダの直下に、元のフォルダの中の構成のまま保存する。元のフォルダ名のフォルダは作らない（`icons/sub/b.png`を読み込んで`out`を選ぶと`out/sub/b.png`）
+- 同じ名前のファイルがすでにあるときは、件数と名前を出して確認してから上書きする。読み込み元のフォルダを選んでしまったときも、ここで止められる
+- 前回の保存から外した画像のファイルは、消さずにそのまま残る
+- 「ZIPで保存」は`<元フォルダ名>-<HEX>.zip`（例: `icons-E53935.zip`）の中に同じ名前のフォルダを作って入れる。ばらばらのファイルを読み込んだ場合は`recolor-<HEX>`になる
 
 ## 開発
 
@@ -42,4 +42,4 @@ pnpm typecheck
 pnpm build
 ```
 
-Next.js 16（App Router）/ Tailwind CSS v4 / Biome / Vitest / Playwright。PNGの書き出しはfast-png、ZIPはfflate。
+Next.js 16（App Router）/ Tailwind CSS v4 / Biome / Vitest / Playwright。PNGの書き出しはfast-png、ZIPはfflate、保存結果の通知はsonner。

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Toaster, toast } from "sonner";
 import {
   type Collected,
   fromDataTransfer,
@@ -18,14 +19,19 @@ import {
 import { type Hsv, hexCode, hsvToRgb, rgbToHex, textOn } from "@/lib/color";
 import { makeMask, renderPng, revokeMask } from "@/lib/image";
 import { comparePaths, fileName, outputLayout } from "@/lib/paths";
-import { downloadZip, hasFolderAccess, pickSaveFolder, writeToFolder } from "@/lib/save";
+import {
+  downloadZip,
+  findExisting,
+  hasFolderAccess,
+  pickSaveFolder,
+  writeToFolder,
+} from "@/lib/save";
 import { load, store } from "@/lib/storage";
 import { ColorPanel } from "./ColorPanel";
 import { type Item, PreviewGrid } from "./PreviewGrid";
 
 type Background = "white" | "black" | "checker";
 type Progress = { done: number; total: number };
-type Status = { kind: "ok" | "error"; text: string };
 
 const BACKGROUNDS: { value: Background; label: string }[] = [
   { value: "white", label: "白" },
@@ -55,6 +61,23 @@ function describeSaveError(err: unknown): string {
   return `保存できませんでした（${err instanceof Error ? err.message : String(err)}）`;
 }
 
+function confirmOverwrite(folder: string, existing: string[]): boolean {
+  const where = folder ? `「${folder}」` : "選んだフォルダ";
+  const more = existing.length > 5 ? `\nほか${existing.length - 5}件` : "";
+  const names = existing.slice(0, 5).join("\n") + more;
+  return window.confirm(
+    `${where}には同じ名前のファイルが${existing.length}件あります。上書きしますか？\n\n${names}`,
+  );
+}
+
+const toasterStyle = {
+  fontFamily: "var(--font-sans)",
+  "--normal-bg": "var(--color-panel)",
+  "--normal-border": "var(--color-line)",
+  "--normal-text": "var(--color-fg)",
+  "--border-radius": "4px",
+} as CSSProperties;
+
 export default function Recolorer() {
   const [hsv, setHsv] = useState<Hsv>(() => load("color", { h: 4, s: 0.76, v: 0.9 }, isHsv));
   const [swatches, setSwatches] = useState<string[]>(() => load("swatches", [], isHexList));
@@ -68,7 +91,6 @@ export default function Recolorer() {
   const [importing, setImporting] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState<Progress | null>(null);
-  const [status, setStatus] = useState<Status | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const [folderMode] = useState(hasFolderAccess);
@@ -99,7 +121,6 @@ export default function Recolorer() {
   }, []);
 
   const addFiles = async ({ picked, skipped }: Collected) => {
-    setStatus(null);
     if (picked.length === 0) {
       setNotice(
         skipped > 0
@@ -164,14 +185,12 @@ export default function Recolorer() {
       if (gone) revokeMask(gone.mask);
       return prev.filter((i) => i.path !== path);
     });
-    setStatus(null);
   }, []);
 
   const clearAll = () => {
     for (const item of items) revokeMask(item.mask);
     setItems([]);
     setNotice(null);
-    setStatus(null);
   };
 
   const save = async () => {
@@ -184,24 +203,25 @@ export default function Recolorer() {
       render: () => renderPng(item.file, color, clearWhite),
     }));
     const total = jobs.length;
-    setStatus(null);
+    // Only the outcome of this save should be on screen.
+    toast.dismiss();
     try {
       if (folderMode) {
-        const parent = await pickSaveFolder();
-        if (!parent) return;
+        const dir = await pickSaveFolder();
+        if (!dir) return;
+        const existing = await findExisting(dir, files);
+        if (existing.length > 0 && !confirmOverwrite(dir.name, existing)) return;
         setSaving({ done: 0, total });
-        const saved = await writeToFolder(parent, folder, jobs, (done) =>
-          setSaving({ done, total }),
-        );
-        const where = parent.name ? `${parent.name}/${saved}` : saved;
-        setStatus({ kind: "ok", text: `${where} に${total}枚保存しました` });
+        await writeToFolder(dir, jobs, (done) => setSaving({ done, total }));
+        const where = dir.name ? `${dir.name} ` : "選んだフォルダ";
+        toast.success(`${where}に${total}枚保存しました`);
       } else {
         setSaving({ done: 0, total });
         await downloadZip(folder, jobs, (done) => setSaving({ done, total }));
-        setStatus({ kind: "ok", text: `${folder}.zip を保存しました` });
+        toast.success(`${folder}.zip を保存しました`);
       }
     } catch (err) {
-      setStatus({ kind: "error", text: describeSaveError(err) });
+      toast.error(describeSaveError(err), { duration: 10_000 });
     } finally {
       setSaving(null);
     }
@@ -268,142 +288,149 @@ export default function Recolorer() {
   );
 
   return (
-    <div className="app" style={vars} {...dropHandlers}>
-      <aside className="panel">
-        <h1 className="brand">Image Editor</h1>
-        <ColorPanel
-          hsv={hsv}
-          onChange={setHsv}
-          swatches={swatches}
-          onSwatchesChange={setSwatches}
-        />
+    <>
+      <div className="app" style={vars} {...dropHandlers}>
+        <aside className="panel">
+          <h1 className="brand">Image Editor</h1>
+          <ColorPanel
+            hsv={hsv}
+            onChange={setHsv}
+            swatches={swatches}
+            onSwatchesChange={setSwatches}
+          />
 
-        <div className="save">
-          <label className="toggle">
-            白い部分を透明にする
-            <input
-              type="checkbox"
-              checked={clearWhite}
-              onChange={(e) => setClearWhite(e.target.checked)}
-            />
-          </label>
-          <button
-            type="button"
-            className="save-btn"
-            onClick={save}
-            disabled={items.length === 0 || saving !== null || importing !== null}
-            title="⌘S"
-          >
-            {saveLabel}
-          </button>
-          {items.length > 0 && (
-            <p className="save-note">
-              {folderMode
-                ? `選んだフォルダの中に「${layout.folder}」を作って保存します`
-                : `「${layout.folder}.zip」をダウンロードします`}
-            </p>
-          )}
-          <p className="status" data-kind={status?.kind} aria-live="polite">
-            {status?.text}
-          </p>
-        </div>
-      </aside>
-
-      <main className="stage" data-bg={background} data-white={clearWhite ? "clear" : "keep"}>
-        {items.length > 0 || importing ? (
-          <>
-            <div className="toolbar">
-              <div className="toolbar-group">
-                <span className="count">{items.length}枚</span>
-                {pickButtons("追加")}
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={clearAll}
-                  disabled={importing !== null}
-                >
-                  すべて外す
-                </button>
-              </div>
-              <div className="toolbar-group toolbar-end">
-                <fieldset className="segmented">
-                  <legend className="sr-only">プレビューの背景</legend>
-                  {BACKGROUNDS.map((b) => (
-                    <button
-                      key={b.value}
-                      type="button"
-                      aria-pressed={background === b.value}
-                      onClick={() => setBackground(b.value)}
-                    >
-                      <span className="bg-dot" data-bg={b.value} />
-                      {b.label}
-                    </button>
-                  ))}
-                </fieldset>
-                <input
-                  type="range"
-                  className="size-range"
-                  min={64}
-                  max={256}
-                  step={8}
-                  value={tileSize}
-                  onChange={(e) => setTileSize(Number(e.target.value))}
-                  aria-label="プレビューの大きさ"
-                  title="プレビューの大きさ"
-                />
-              </div>
-              {(importing || notice) && (
-                <p className="notice" aria-live="polite">
-                  {importing ? `読み込み中 ${importing.done} / ${importing.total}` : notice}
-                </p>
-              )}
-            </div>
-            <PreviewGrid items={items} onRemove={removeItem} />
-          </>
-        ) : (
-          <div className="empty">
-            <div>
-              <svg className="empty-mark" viewBox="0 0 48 48" aria-hidden="true">
-                <path d="M24 4c7 9.5 14 17.6 14 25.5a14 14 0 0 1-28 0C10 21.6 17 13.5 24 4Z" />
-              </svg>
-              <p className="empty-title">PNGをここにドロップ</p>
-              <p className="empty-sub">
-                フォルダのままドロップすると、中の画像をまとめて読み込みます
+          {/* The button comes last: the block sits at the bottom of the panel, so
+            nothing that appears or changes above it can move it. */}
+          <div className="save">
+            <label className="toggle">
+              白い部分を透明にする
+              <input
+                type="checkbox"
+                checked={clearWhite}
+                onChange={(e) => setClearWhite(e.target.checked)}
+              />
+            </label>
+            {items.length > 0 && (
+              <p className="save-note">
+                {folderMode
+                  ? "選んだフォルダの直下に保存します。同じ名前のファイルがあれば、上書きする前に確認します"
+                  : `「${layout.folder}.zip」をダウンロードします`}
               </p>
-              <div className="empty-actions">{pickButtons("選ぶ")}</div>
-              {notice && <p className="notice">{notice}</p>}
+            )}
+            <button
+              type="button"
+              className="save-btn"
+              onClick={save}
+              disabled={items.length === 0 || saving !== null || importing !== null}
+              title="⌘S"
+            >
+              {saveLabel}
+            </button>
+          </div>
+        </aside>
+
+        <main className="stage" data-bg={background} data-white={clearWhite ? "clear" : "keep"}>
+          {items.length > 0 || importing ? (
+            <>
+              <div className="toolbar">
+                <div className="toolbar-group">
+                  <span className="count">{items.length}枚</span>
+                  {pickButtons("追加")}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={clearAll}
+                    disabled={importing !== null}
+                  >
+                    すべて外す
+                  </button>
+                </div>
+                <div className="toolbar-group toolbar-end">
+                  <fieldset className="segmented">
+                    <legend className="sr-only">プレビューの背景</legend>
+                    {BACKGROUNDS.map((b) => (
+                      <button
+                        key={b.value}
+                        type="button"
+                        aria-pressed={background === b.value}
+                        onClick={() => setBackground(b.value)}
+                      >
+                        <span className="bg-dot" data-bg={b.value} />
+                        {b.label}
+                      </button>
+                    ))}
+                  </fieldset>
+                  <input
+                    type="range"
+                    className="size-range"
+                    min={64}
+                    max={256}
+                    step={8}
+                    value={tileSize}
+                    onChange={(e) => setTileSize(Number(e.target.value))}
+                    aria-label="プレビューの大きさ"
+                    title="プレビューの大きさ"
+                  />
+                </div>
+                {(importing || notice) && (
+                  <p className="notice" aria-live="polite">
+                    {importing ? `読み込み中 ${importing.done} / ${importing.total}` : notice}
+                  </p>
+                )}
+              </div>
+              <PreviewGrid items={items} onRemove={removeItem} />
+            </>
+          ) : (
+            <div className="empty">
+              <div>
+                <svg className="empty-mark" viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M24 4c7 9.5 14 17.6 14 25.5a14 14 0 0 1-28 0C10 21.6 17 13.5 24 4Z" />
+                </svg>
+                <p className="empty-title">PNGをここにドロップ</p>
+                <p className="empty-sub">
+                  フォルダのままドロップすると、中の画像をまとめて読み込みます
+                </p>
+                <div className="empty-actions">{pickButtons("選ぶ")}</div>
+                {notice && <p className="notice">{notice}</p>}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {dragging && (
-          <div className="drop-overlay" aria-hidden="true">
-            ドロップして追加
-          </div>
-        )}
-      </main>
+          {dragging && (
+            <div className="drop-overlay" aria-hidden="true">
+              ドロップして追加
+            </div>
+          )}
+        </main>
 
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/png"
-        multiple
-        hidden
-        onChange={(e) => {
-          if (e.target.files) void addFiles(fromFileList(e.target.files));
-          e.target.value = "";
-        }}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void addFiles(fromFileList(e.target.files));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void addFiles(fromFileList(e.target.files));
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <Toaster
+        theme="dark"
+        // Set inline: sonner injects its stylesheet after the app's, so its
+        // theme would win over these from a CSS file.
+        style={toasterStyle}
       />
-      <input
-        ref={folderInput}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => {
-          if (e.target.files) void addFiles(fromFileList(e.target.files));
-          e.target.value = "";
-        }}
-      />
-    </div>
+    </>
   );
 }

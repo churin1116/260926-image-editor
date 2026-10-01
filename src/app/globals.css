@@ -303,8 +303,6 @@
     background: var(--ink);
     color: var(--on-ink);
     font-weight: 600;
-    /* Keeps the button's edge visible when the ink is close to the panel gray. */
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
   }
 
   .save-btn:disabled {
@@ -312,22 +310,10 @@
     color: #9a9a9a;
   }
 
-  .save-note,
-  .status {
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
   .save-note {
     color: var(--color-muted);
-  }
-
-  .status:empty {
-    display: none;
-  }
-
-  .status[data-kind="error"] {
-    color: #ffb4a8;
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
 
   /* Preview stage */
@@ -584,4 +570,12 @@
     outline-offset: -16px;
     pointer-events: none;
   }
+}
+
+/*
+ * Outside any layer on purpose: sonner injects its own unlayered styles, which
+ * would beat anything in a layer. The extra attribute outranks its selector.
+ */
+[data-sonner-toast][data-styled="true"][data-type="error"] {
+  color: #ffb4a8;
 }

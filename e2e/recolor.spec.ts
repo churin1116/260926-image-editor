@@ -113,13 +113,18 @@ test("opens a folder, recolors every preview, and saves exact pixels", async ({ 
     await expect(ink).toHaveCSS("background-color", "rgb(30, 136, 229)");
   }
 
-  await page.getByRole("button", { name: "フォルダに保存" }).click();
-  await expect(page.getByText("out/icons-1E88E5 に2枚保存しました")).toBeVisible();
+  // The result shows as a toast, so the button stays exactly where it was.
+  const save = page.getByRole("button", { name: "フォルダに保存" });
+  const before = await save.boundingBox();
+  await save.click();
+  await expect(page.getByText("out に2枚保存しました")).toBeVisible();
+  expect(await save.boundingBox()).toEqual(before);
 
+  // Straight into the chosen folder, keeping the subfolders but not "icons" itself.
   const files = await savedFiles(page);
-  expect(Object.keys(files).sort()).toEqual(["icons-1E88E5/a.png", "icons-1E88E5/sub/b.png"]);
-  const a = files["icons-1E88E5/a.png"];
-  const b = files["icons-1E88E5/sub/b.png"];
+  expect(Object.keys(files).sort()).toEqual(["a.png", "sub/b.png"]);
+  const a = files["a.png"];
+  const b = files["sub/b.png"];
   expect(pixel(a, 8, 8)).toEqual([30, 136, 229, 255]);
   expect(pixel(a, 2, 2)).toEqual([30, 136, 229, 3]);
   expect(pixel(a, 0, 0)[3]).toBe(0);
@@ -142,10 +147,10 @@ test("clearing white makes the white background transparent", async ({ page }) =
   await expect(paper).toBeHidden();
 
   await page.getByRole("button", { name: "フォルダに保存" }).click();
-  await expect(page.getByText("out/icons-1E88E5 に2枚保存しました")).toBeVisible();
+  await expect(page.getByText("out に2枚保存しました")).toBeVisible();
   const files = await savedFiles(page);
-  const a = files["icons-1E88E5/a.png"];
-  const b = files["icons-1E88E5/sub/b.png"];
+  const a = files["a.png"];
+  const b = files["sub/b.png"];
   expect(pixel(a, 8, 8)).toEqual([30, 136, 229, 255]);
   expect(pixel(a, 2, 2)).toEqual([30, 136, 229, 3]);
   expect(pixel(b, 8, 8)).toEqual([30, 136, 229, 255]);
@@ -157,24 +162,41 @@ test("clearing white makes the white background transparent", async ({ page }) =
   await expect(page.getByLabel("白い部分を透明にする")).toBeChecked();
 });
 
-test("saving the same color again goes into a new folder", async ({ page }) => {
+test("asks before replacing files already in the folder", async ({ page }) => {
   await useOpfsPickers(page);
   await page.getByRole("button", { name: "フォルダを選ぶ" }).click();
   await expect(page.locator(".tile")).toHaveCount(2);
-  await setHex(page, "1e88e5");
-
   const save = page.getByRole("button", { name: "フォルダに保存" });
-  await save.click();
-  await expect(page.getByText("out/icons-1E88E5 に2枚保存しました")).toBeVisible();
-  await page.getByRole("button", { name: "b.png を外す" }).click({ force: true });
-  await save.click();
-  await expect(page.getByText("out/icons-1E88E5-2 に1枚保存しました")).toBeVisible();
+  const dialogs: string[] = [];
+  let accept = false;
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void (accept ? dialog.accept() : dialog.dismiss());
+  });
 
-  expect(Object.keys(await savedFiles(page)).sort()).toEqual([
-    "icons-1E88E5-2/a.png",
-    "icons-1E88E5/a.png",
-    "icons-1E88E5/sub/b.png",
-  ]);
+  // Nothing there yet, so nothing to ask.
+  await setHex(page, "1e88e5");
+  await save.click();
+  await expect(page.getByText("out に2枚保存しました")).toBeVisible();
+  expect(dialogs).toEqual([]);
+
+  // Declining leaves the earlier files as they were.
+  await setHex(page, "ffcc00");
+  await save.click();
+  await expect.poll(() => dialogs.length).toBe(1);
+  expect(dialogs[0]).toContain("「out」には同じ名前のファイルが2件あります");
+  expect(dialogs[0]).toContain("sub/b.png");
+  await expect(save).toBeEnabled();
+  await expect(page.getByText("に2枚保存しました")).toHaveCount(0);
+  expect(pixel((await savedFiles(page))["a.png"], 8, 8)).toEqual([30, 136, 229, 255]);
+
+  accept = true;
+  await save.click();
+  await expect(page.getByText("out に2枚保存しました")).toBeVisible();
+  const files = await savedFiles(page);
+  expect(Object.keys(files).sort()).toEqual(["a.png", "sub/b.png"]);
+  expect(pixel(files["a.png"], 8, 8)).toEqual([255, 204, 0, 255]);
+  expect(pixel(files["sub/b.png"], 8, 8)).toEqual([255, 204, 0, 255]);
 });
 
 test("arrow keys on the hue ring step the color, even when pressed quickly", async ({ page }) => {

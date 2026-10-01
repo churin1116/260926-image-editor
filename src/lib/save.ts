@@ -26,39 +26,40 @@ export async function pickSaveFolder(): Promise<FileSystemDirectoryHandle | null
   }
 }
 
-/**
- * The base name, or "-2", "-3"… appended while that name is taken. Saving into
- * an existing folder would leave behind images removed since the last save.
- */
-export async function freeName(base: string, taken: (name: string) => Promise<boolean>) {
-  if (!(await taken(base))) return base;
-  for (let n = 2; ; n++) {
-    if (!(await taken(`${base}-${n}`))) return `${base}-${n}`;
-  }
-}
-
-async function exists(parent: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+async function fileExists(root: FileSystemDirectoryHandle, path: string): Promise<boolean> {
+  const parts = path.split("/");
+  const name = parts.pop() as string;
   try {
-    await parent.getDirectoryHandle(name);
+    let dir = root;
+    for (const part of parts) dir = await dir.getDirectoryHandle(part);
+    await dir.getFileHandle(name);
     return true;
   } catch (err) {
-    if (!(err instanceof DOMException)) throw err;
-    if (err.name === "NotFoundError") return false;
-    // A file already has the name, which rules it out just the same.
-    if (err.name === "TypeMismatchError") return true;
+    if (err instanceof DOMException && err.name === "NotFoundError") return false;
     throw err;
   }
 }
 
-/** Resolves to the name of the folder actually created. */
+/**
+ * The paths that already name a file in the folder. Saving writes straight
+ * into the chosen folder, so these would be replaced; asking first is what
+ * keeps the originals safe when the user picks the folder they loaded from.
+ */
+export async function findExisting(
+  root: FileSystemDirectoryHandle,
+  paths: string[],
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const path of paths) if (await fileExists(root, path)) found.push(path);
+  return found;
+}
+
+/** Writes each file at its path under the folder, replacing any file already there. */
 export async function writeToFolder(
-  parent: FileSystemDirectoryHandle,
-  folder: string,
+  root: FileSystemDirectoryHandle,
   jobs: Job[],
   onProgress: Progress,
-): Promise<string> {
-  const name = await freeName(folder, (n) => exists(parent, n));
-  const root = await parent.getDirectoryHandle(name, { create: true });
+): Promise<void> {
   for (const [i, job] of jobs.entries()) {
     const parts = job.path.split("/");
     const file = parts.pop() as string;
@@ -69,7 +70,6 @@ export async function writeToFolder(
     await writable.close();
     onProgress(i + 1);
   }
-  return name;
 }
 
 /**
